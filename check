@@ -1,0 +1,109 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+
+require "optparse"
+require "open3"
+include Open3
+
+MAX_VALUE = 9999
+MAX_LEN = 50
+
+def random_array(n)
+  Array.new(n) { rand(MAX_VALUE)+1 }
+end
+
+def check_presentation_error(output, expected)
+  pos = 0
+  expected.each do |x|
+    s = x.to_s
+    unless pos = output.index(s, pos)
+      return false
+    end
+    pos += s.size
+  end
+  true
+end
+
+delimiter = "\n"
+terminator = nil
+leading_number = false
+leak_check = false
+output_space_count = 1
+
+opt = OptionParser.new
+opt.on("-d DELIMITER") {|d| delimiter = d }
+opt.on("-t TERMINATOR") {|t| terminator = t }
+opt.on("-l") { leading_number = true }
+opt.on("-m") { leak_check = true }
+opt.on("-s N") {|n| output_space_count = n.to_i }
+opt.parse!(ARGV)
+filename = ARGV[0]
+
+out, status = capture2e("gcc -Wall #{filename}")
+if status != 0
+  puts "[Compile Error]"
+  puts out
+  exit
+end
+
+testcases = [
+  [1],
+  [MAX_VALUE],
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+  [1] * MAX_LEN,
+  [MAX_VALUE] * MAX_LEN,
+]
+
+srand(12345)
+
+(2..6).each do |i|
+  testcases.concat(random_array(i).permutation(i).to_a)
+end
+
+500.times do
+  testcases.push(random_array(rand(MAX_LEN)+1))
+end
+
+result = "Accepted"
+testcases.each_with_index do |testcase, i|
+  input = ""
+  input << testcase.size.to_s << "\n" if leading_number
+  input << testcase.join(delimiter)
+  input << delimiter if delimiter == "\n"
+  input << terminator << "\n" if terminator
+  command = "./a.out"
+  command = "valgrind --leak-check=yes #{command}" if leak_check
+  out, status = capture2("./a.out", stdin_data: input)
+
+  ok = true
+  first_line = true
+  testcase.sort.each_slice(10) do |xs|
+    re_str = xs.map{|x| "%4d" % x}.join('\s'*output_space_count) + '\s*.?\s*$'
+    re_str = '^\s*' + re_str unless first_line
+    re = Regexp.new(re_str)
+    unless re =~ out
+      pe = check_presentation_error(out, testcase.sort)
+      result = pe ? "Presentation Error" : "Wrong Answer"
+      puts "Case ##{i}: #{result}"
+      if pe
+        result = "Presentation Error"
+        puts "Regexp:"
+        puts re_str
+        puts "Output:"
+        puts out
+      else
+        puts "Input:"
+        puts testcase.join(", ")
+        puts "Output:"
+        puts out
+        exit
+      end
+      ok = false
+      break
+    end
+    first_line = false
+  end
+  puts "Case ##{i}: Passed" if ok
+end
+
+puts result
